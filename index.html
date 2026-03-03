@@ -103,7 +103,7 @@
   </div>
 
   <div class="hint">
- على الهاتف: اسحبي من طرف الصفحة للتقليب.
+    على الهاتف: اسحبي من طرف الصفحة للتقليب. (يفضّل الوضع الأفقي لعرض صفحتين كاملتين)
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/page-flip/dist/js/page-flip.browser.min.js"></script>
@@ -111,8 +111,18 @@
   <script>
     const TOTAL_PAGES = 24;
 
-    // ✅ الصور بجانب index.html
-    const pages = Array.from({length: TOTAL_PAGES}, (_,i) => `${i+1}.jpg`);
+    // ✅ ترتيب مخصص:
+    // 1 غلاف لوحده
+    // ثم داخل كل زوج: (الفردي على اليسار) و(الزوجي على اليمين)
+    // يعني: 3 يسار + 2 يمين ، 5 يسار + 4 يمين ... 23 يسار + 22 يمين
+    // 24 غلاف لوحده
+    const pages = [];
+    pages.push("1.jpg");
+    for (let i = 2; i <= TOTAL_PAGES - 2; i += 2) {
+      pages.push(`${i + 1}.jpg`); // 3,5,7.. (يسار)
+      pages.push(`${i}.jpg`);     // 2,4,6.. (يمين)
+    }
+    pages.push("24.jpg");
 
     const bookEl = document.getElementById("book");
     const wrapEl = document.getElementById("book-wrap");
@@ -132,8 +142,7 @@
       loadingEl.classList.add("hide");
     }
 
-    // ✅ (1) نقرأ نسبة صورة فعلية من أول صفحة (بدون تنزيل كل الصور)
-    // هذا يحل مشكلة "نصفية" لأنه سيحسب المقاس الصحيح (contain) حسب ratio الحقيقي
+    // نقرأ نسبة أول صورة (بعد الترتيب الجديد: أول صورة = 1.jpg)
     function getFirstImageRatio(src){
       return new Promise(resolve=>{
         const img = new Image();
@@ -142,28 +151,19 @@
           const h = img.naturalHeight || 1;
           resolve(w / h);
         };
-        img.onerror = () => resolve(1); // fallback
+        img.onerror = () => resolve(1);
         img.src = src + "?v=" + Date.now();
       });
     }
 
-    // ✅ (2) حساب مقاس الصفحة بحيث:
-    // - صفحتين جنب بعض
-    // - بدون قص (contain)
-    // - يعمل عمودي/أفقي
     function computePageSize(pageRatio){
       const W = Math.max(320, wrapEl.clientWidth);
       const H = Math.max(320, wrapEl.clientHeight);
 
-      // لو عندنا صفحتين: الكتاب عرضه = 2*pageW وارتفاعه = pageH
-      // والصفحة ratio = pageW/pageH = pageRatio
-
-      // قياس حسب الارتفاع
       let pageH_byH = H;
       let pageW_byH = pageH_byH * pageRatio;
       let bookW_byH = pageW_byH * 2;
 
-      // إذا عرض الكتاب أكبر من الحاوية، نقيّد بالعرض
       if (bookW_byH > W){
         const pageW = W / 2;
         const pageH = pageW / pageRatio;
@@ -173,7 +173,6 @@
       return { pageW: Math.floor(pageW_byH), pageH: Math.floor(pageH_byH) };
     }
 
-    // ✅ (3) تحميل سريع: فقط أول صورتين/4 صور (حسب الهاتف) ليفتح بسرعة
     function preloadSome(urls, count, onProgress){
       const subset = urls.slice(0, count);
       let done = 0;
@@ -182,12 +181,10 @@
         const img = new Image();
         img.onload = () => { done++; onProgress && onProgress(done, subset.length); resolve(true); };
         img.onerror = () => { done++; onProgress && onProgress(done, subset.length); resolve(false); };
-        // بدون Date.now هنا حتى نستفيد من كاش المتصفح لاحقاً
         img.src = src;
       })));
     }
 
-    // ✅ (4) تحميل الباقي بالخلفية بدون ما يعلق
     function preloadRest(urls, startIndex){
       const rest = urls.slice(startIndex);
       rest.forEach(src=>{
@@ -201,19 +198,15 @@
 
       try { if (pageFlip) currentIndex = pageFlip.getCurrentPageIndex(); } catch(e){ currentIndex = 0; }
 
-      // فريمين لاستقرار القياس بعد دوران
       await new Promise(r => requestAnimationFrame(()=>requestAnimationFrame(r)));
 
-      // اقرأ ratio من أول صفحة
       const ratio = await getFirstImageRatio(pages[0]);
 
-      // حمّل قليل عشان يفتح بسرعة (على الهاتف حمّل أقل)
-      const firstLoadCount = isMobile() ? 2 : 4; // 2 صور للهاتف، 4 للكمبيوتر
+      const firstLoadCount = isMobile() ? 2 : 4;
       await preloadSome(pages, firstLoadCount, (d, tot)=>{
         showLoading(`تحميل سريع: ${d}/${tot}…`);
       });
 
-      // إعادة بناء نظيفة
       if (pageFlip){
         try{ pageFlip.destroy(); }catch(e){}
         pageFlip = null;
@@ -227,11 +220,9 @@
         width: pageW,
         height: pageH,
 
-        // ✅ صفحتين دائمًا حتى على الهاتف
         size: "fixed",
         usePortrait: false,
 
-        // ✅ الغلاف لوحده
         showCover: true,
 
         mobileScrollSupport: true,
@@ -249,7 +240,6 @@
 
       hideLoading();
 
-      // حمّل الباقي بالخلفية
       setTimeout(()=>preloadRest(pages, firstLoadCount), 200);
     }
 
