@@ -14,6 +14,7 @@
       height:100%;
       background:#f2f2f2;
       font-family: Arial, sans-serif;
+      overflow:hidden;
     }
 
     body{
@@ -24,38 +25,23 @@
       gap:10px;
       padding:10px;
       -webkit-tap-highlight-color: transparent;
-      touch-action: pan-y;
     }
 
-    /* حاوية الكتاب */
     #book-wrap{
-      width:min(1200px, 98vw);
-      height:min(78vh, 760px);
-      min-height:320px;
+      width: min(1200px, 99vw);
+      height: min(82svh, 760px);
+      min-height: 320px;
       position:relative;
-      background:transparent;
+      border-radius: 14px;
+      overflow:hidden;
+      background:#fff;
+      box-shadow: 0 14px 45px rgba(0,0,0,.14);
     }
 
     #book{
       width:100%;
       height:100%;
     }
-
-    /* overlay للتحميل */
-    .loading{
-      position:absolute;
-      inset:0;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      background:rgba(242,242,242,.92);
-      border-radius:12px;
-      font-size:14px;
-      color:#333;
-      z-index:5;
-      visibility:hidden;
-    }
-    .loading.show{ visibility:visible; }
 
     .btns{
       display:flex;
@@ -80,24 +66,26 @@
       text-align:center;
       opacity:.9;
       line-height:1.5;
-      max-width: 1000px;
     }
 
-    /* على الهاتف: نضمن أنه يشوف صفحتين بدون قص */
+    .loading{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:rgba(255,255,255,.92);
+      font-size:14px;
+      color:#333;
+      z-index:5;
+    }
+    .loading.hide{ display:none; }
+
     @media (max-width: 900px){
-      #book-wrap{
-        width: 99vw;
-        height: min(70vh, 520px);
-        min-height: 280px;
-      }
+      #book-wrap{ width: 99vw; height: min(78svh, 720px); }
     }
-
-    /* هاتف أفقي */
     @media (max-width: 900px) and (orientation: landscape){
-      #book-wrap{
-        width: 99vw;
-        height: min(86vh, 620px);
-      }
+      #book-wrap{ width: 99vw; height: min(88svh, 900px); }
     }
   </style>
 </head>
@@ -105,7 +93,7 @@
 <body>
 
   <div id="book-wrap">
-    <div class="loading" id="loading">جاري تحميل الصفحات…</div>
+    <div class="loading" id="loading"><span id="loadingText">جاري تحميل الصفحات…</span></div>
     <div id="book"></div>
   </div>
 
@@ -115,9 +103,7 @@
   </div>
 
   <div class="hint">
-    ✅ ترتيب الصفحات: 2,4,6.. يمين — 3,5,7.. يسار. الغلاف 1 يظهر لوحده (يسار) + صفحة بيضاء، والغلاف 24 لوحده.
-    <br>
-    على الهاتف: اسحبي من طرف الصفحة أو انقري على طرفها للتقليب.
+ على الهاتف: اسحبي من طرف الصفحة للتقليب.
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/page-flip/dist/js/page-flip.browser.min.js"></script>
@@ -125,142 +111,161 @@
   <script>
     const TOTAL_PAGES = 24;
 
-    // ✅ صوت تقليب خفيف (ممكن بعض الأجهزة تشغّله بعد أول لمسة فقط)
-    const flipSound = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=");
-    flipSound.volume = 0.2;
-    function playFlipSound(){
-      try{
-        flipSound.currentTime = 0;
-        flipSound.play().catch(()=>{});
-      }catch(e){}
-    }
-
-    // ✅ نبني ترتيب الصفحات حسب طلبك:
-    // 1 لوحدها
-    // الأزواج: (2,3)-> نعرض 3 ثم 2 ليصير 2 يمين و3 يسار
-    // ...
-    // 24 لوحدها
-    const pages = [];
-    pages.push("1.jpg");
-
-    for(let i=2; i<=TOTAL_PAGES-2; i+=2){
-      // (i = 2,4,6..22) و (i+1 = 3,5,7..23)
-      pages.push(`${i+1}.jpg`); // يسار
-      pages.push(`${i}.jpg`);   // يمين
-    }
-
-    pages.push("24.jpg");
+    // ✅ الصور بجانب index.html
+    const pages = Array.from({length: TOTAL_PAGES}, (_,i) => `${i+1}.jpg`);
 
     const bookEl = document.getElementById("book");
     const wrapEl = document.getElementById("book-wrap");
     const loadingEl = document.getElementById("loading");
+    const loadingText = document.getElementById("loadingText");
+
     let pageFlip = null;
+    let currentIndex = 0;
 
     const isMobile = () => window.matchMedia("(max-width: 900px)").matches;
 
-    function showLoading(on){
-      loadingEl.classList.toggle("show", !!on);
+    function showLoading(msg){
+      loadingText.textContent = msg || "جاري تحميل الصفحات…";
+      loadingEl.classList.remove("hide");
+    }
+    function hideLoading(){
+      loadingEl.classList.add("hide");
     }
 
-    // ✅ تحسين التحميل: تحميل الصفحات على دفعات (chunk) لتجنب تجميد الهاتف
-    async function preloadInChunks(urls, chunkSize = 4){
-      showLoading(true);
+    // ✅ (1) نقرأ نسبة صورة فعلية من أول صفحة (بدون تنزيل كل الصور)
+    // هذا يحل مشكلة "نصفية" لأنه سيحسب المقاس الصحيح (contain) حسب ratio الحقيقي
+    function getFirstImageRatio(src){
+      return new Promise(resolve=>{
+        const img = new Image();
+        img.onload = () => {
+          const w = img.naturalWidth || 1;
+          const h = img.naturalHeight || 1;
+          resolve(w / h);
+        };
+        img.onerror = () => resolve(1); // fallback
+        img.src = src + "?v=" + Date.now();
+      });
+    }
 
-      for(let i=0; i<urls.length; i+=chunkSize){
-        const chunk = urls.slice(i, i+chunkSize);
-        await Promise.all(chunk.map(src => new Promise(resolve=>{
-          const img = new Image();
-          img.onload = () => resolve(true);
-          img.onerror = () => resolve(false);
-          img.decoding = "async";
-          img.loading = "eager";
-          img.src = src;
-        })));
-        // نترك UI يتنفس (مهم على الموبايل)
-        await new Promise(r => setTimeout(r, 30));
+    // ✅ (2) حساب مقاس الصفحة بحيث:
+    // - صفحتين جنب بعض
+    // - بدون قص (contain)
+    // - يعمل عمودي/أفقي
+    function computePageSize(pageRatio){
+      const W = Math.max(320, wrapEl.clientWidth);
+      const H = Math.max(320, wrapEl.clientHeight);
+
+      // لو عندنا صفحتين: الكتاب عرضه = 2*pageW وارتفاعه = pageH
+      // والصفحة ratio = pageW/pageH = pageRatio
+
+      // قياس حسب الارتفاع
+      let pageH_byH = H;
+      let pageW_byH = pageH_byH * pageRatio;
+      let bookW_byH = pageW_byH * 2;
+
+      // إذا عرض الكتاب أكبر من الحاوية، نقيّد بالعرض
+      if (bookW_byH > W){
+        const pageW = W / 2;
+        const pageH = pageW / pageRatio;
+        return { pageW: Math.floor(pageW), pageH: Math.floor(pageH) };
       }
 
-      showLoading(false);
+      return { pageW: Math.floor(pageW_byH), pageH: Math.floor(pageH_byH) };
     }
 
-    // ✅ حساب حجم الصفحة بحيث تظهر صفحتان كاملتان بدون قص
-    function computePageSize(){
-      const W = Math.max(320, wrapEl.clientWidth);
-      const H = Math.max(280, wrapEl.clientHeight);
+    // ✅ (3) تحميل سريع: فقط أول صورتين/4 صور (حسب الهاتف) ليفتح بسرعة
+    function preloadSome(urls, count, onProgress){
+      const subset = urls.slice(0, count);
+      let done = 0;
 
-      // نريد صفحتين جنب بعض => 2*pageW <= W
-      // ونريد ارتفاع كامل => pageH <= H
-      // صورك مربعة غالبًا، لكن حتى لو ليست مربعة: الأفضل نخلي الصفحة "أقرب للمربع" لتجنب قص
-      let page = Math.floor(Math.min(H, W/2));
-      page = Math.max(240, page);
-
-      return { pageW: page, pageH: page };
+      return Promise.all(subset.map(src => new Promise(resolve=>{
+        const img = new Image();
+        img.onload = () => { done++; onProgress && onProgress(done, subset.length); resolve(true); };
+        img.onerror = () => { done++; onProgress && onProgress(done, subset.length); resolve(false); };
+        // بدون Date.now هنا حتى نستفيد من كاش المتصفح لاحقاً
+        img.src = src;
+      })));
     }
 
-    async function init(){
-      showLoading(true);
+    // ✅ (4) تحميل الباقي بالخلفية بدون ما يعلق
+    function preloadRest(urls, startIndex){
+      const rest = urls.slice(startIndex);
+      rest.forEach(src=>{
+        const img = new Image();
+        img.src = src;
+      });
+    }
 
-      // استقرار القياس بعد دوران الشاشة
-      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    async function initFlipbook(){
+      showLoading("تحضير قياس الصفحات…");
 
-      // preload
-      await preloadInChunks(pages, isMobile() ? 3 : 6);
+      try { if (pageFlip) currentIndex = pageFlip.getCurrentPageIndex(); } catch(e){ currentIndex = 0; }
 
-      // destroy السابق إن وجد
-      if(pageFlip){
+      // فريمين لاستقرار القياس بعد دوران
+      await new Promise(r => requestAnimationFrame(()=>requestAnimationFrame(r)));
+
+      // اقرأ ratio من أول صفحة
+      const ratio = await getFirstImageRatio(pages[0]);
+
+      // حمّل قليل عشان يفتح بسرعة (على الهاتف حمّل أقل)
+      const firstLoadCount = isMobile() ? 2 : 4; // 2 صور للهاتف، 4 للكمبيوتر
+      await preloadSome(pages, firstLoadCount, (d, tot)=>{
+        showLoading(`تحميل سريع: ${d}/${tot}…`);
+      });
+
+      // إعادة بناء نظيفة
+      if (pageFlip){
         try{ pageFlip.destroy(); }catch(e){}
         pageFlip = null;
       }
       bookEl.innerHTML = "";
 
-      const { pageW, pageH } = computePageSize();
+      const { pageW, pageH } = computePageSize(ratio);
       const mobile = isMobile();
 
       pageFlip = new St.PageFlip(bookEl, {
         width: pageW,
         height: pageH,
 
-        // ✅ نثبت الحجم ليضمن عدم القص
+        // ✅ صفحتين دائمًا حتى على الهاتف
         size: "fixed",
-
-        // ✅ نريد صفحتين دائمًا حتى على الهاتف
         usePortrait: false,
 
         // ✅ الغلاف لوحده
         showCover: true,
 
-        // ✅ تحسين اللمس
         mobileScrollSupport: true,
         useMouseEvents: true,
-        swipeDistance: mobile ? 8 : 30,
-        flippingTime: mobile ? 520 : 700,
 
+        swipeDistance: mobile ? 8 : 25,
+        flippingTime: mobile ? 520 : 700,
         maxShadowOpacity: 0.35,
         disableFlipByClick: false
       });
 
       pageFlip.loadFromImages(pages);
 
-      // ✅ صوت عند التقليب
-      pageFlip.on("flip", () => playFlipSound());
+      try { pageFlip.flip(currentIndex); } catch(e){}
 
-      showLoading(false);
+      hideLoading();
+
+      // حمّل الباقي بالخلفية
+      setTimeout(()=>preloadRest(pages, firstLoadCount), 200);
     }
 
-    init();
+    initFlipbook();
 
-    // أزرار
     document.getElementById("next").onclick = () => pageFlip && pageFlip.flipNext();
     document.getElementById("prev").onclick = () => pageFlip && pageFlip.flipPrev();
 
-    // إعادة تهيئة آمنة عند تغيير الحجم/الدوران
     let t = null;
     function scheduleReinit(){
       clearTimeout(t);
-      t = setTimeout(() => init(), 350);
+      t = setTimeout(()=>initFlipbook(), 280);
     }
     window.addEventListener("resize", scheduleReinit);
-    window.addEventListener("orientationchange", () => setTimeout(scheduleReinit, 250));
+    window.addEventListener("orientationchange", ()=> setTimeout(scheduleReinit, 200));
   </script>
+
 </body>
 </html>
